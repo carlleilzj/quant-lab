@@ -1,0 +1,57 @@
+# 1. Mac 系统级隐藏文件
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# 2. Python 及环境文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 3. 虚拟环境
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# 4. IDE 及编辑器配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 5. 量化项目及敏感数据拦截 (极其重要)
+.env
+*.csv
+*.dat
+*.db
+*.sqlite3
+*.log
+data/
+logs/
+config.ini
+secrets.json
