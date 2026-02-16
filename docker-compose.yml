@@ -1,0 +1,201 @@
+version: "3.9"
+
+name: okx-quant-lab
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"   # NATS client
+      - "8222:8222"   # NATS monitoring
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/varz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quant}
+      POSTGRES_DB: ${POSTGRES_DB:-quant}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # --- Core micro-services (modular, event-driven via NATS) ---
+  api:
+    build: .
+    command: ["python", "-m", "app.services.api"]
+    env_file: .env
+    environment:
+      SERVICE_NAME: api
+      METRICS_PORT: 9101
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  data:
+    build: .
+    command: ["python", "-m", "app.services.data"]
+    env_file: .env
+    environment:
+      SERVICE_NAME: data
+      METRICS_PORT: 9102
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  strategy:
+    build: .
+    command: ["python", "-m", "app.services.strategy"]
+    env_file: .env
+    environment:
+      SERVICE_NAME: strategy
+      METRICS_PORT: 9103
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  risk:
+    build: .
+    command: ["python", "-m", "app.services.risk"]
+    env_file: .env
+    environment:
+      SERVICE_NAME: risk
+      METRICS_PORT: 9104
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  execution:
+    build: .
+    command: ["python", "-m", "app.services.execution"]
+    env_file: .env
+    environment:
+      SERVICE_NAME: execution
+      METRICS_PORT: 9105
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  portfolio:
+    build: .
+    command: ["python", "-m", "app.services.portfolio"]
+    env_file: .env
+    environment:
+      SERVICE_NAME: portfolio
+      METRICS_PORT: 9106
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # --- Optional: AI parameter tuner (Optuna) ---
+  ai:
+    build: .
+    command: ["python", "-m", "app.services.ai"]
+    env_file: .env
+    environment:
+      SERVICE_NAME: ai
+      METRICS_PORT: 9107
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    profiles: ["ai"]
+
+  # --- Optional: Observability stack (keep it off by default to save RAM on 16GB) ---
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+      - data
+      - strategy
+      - risk
+      - execution
+      - portfolio
+    profiles: ["observability"]
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    profiles: ["observability"]
+
+  # --- Optional: DB backup loop (pg_dump) ---
+  backup:
+    build: .
+    env_file: .env
+    environment:
+      SERVICE_NAME: backup
+    command: ["bash", "scripts/backup_loop.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - backups:/backups
+    profiles: ["ops"]
+
+volumes:
+  pgdata:
+  grafana_data:
+  backups:
